@@ -1,5 +1,8 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
+import 'package:http/http.dart' as http;
 import 'package:provider/provider.dart';
 import 'package:sizer/sizer.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -7,13 +10,101 @@ import 'package:wefund/BottomNavigationBar.dart';
 import 'package:wefund/DashboardPage.dart';
 import 'package:wefund/IntroducingBrokerPage.dart';
 import 'package:wefund/ThemeProvider.dart';
+import 'package:wefund/copytreding.dart';
+import 'package:wefund/fundscree.dart';
 import 'package:wefund/fundspage.dart';
+import 'package:wefund/pamm.dart';
 import 'package:wefund/setting.dart';
 
-class SettingsPage extends StatelessWidget {
+class Account {
+  int? userId;
+  String? username;
+  String? accountCategory;
+  String? amount;
+  String? platforms;
+  String? accountName;
+
+  Account({
+    this.userId,
+    this.username,
+    this.accountCategory,
+    this.amount,
+    this.platforms,
+    this.accountName,
+  });
+
+  factory Account.fromJson(Map<String, dynamic> json) {
+    return Account(
+      userId: json['user_id'] != null ? int.tryParse(json['user_id'].toString()) : null,
+      username: json['Username'] ?? 'Unknown',
+      accountCategory: json['Account Category'] ?? 'N/A',
+      amount: json['Amount'] ?? '0.00',
+      platforms: json['Platforms'] ?? 'N/A',
+      accountName: json['Account Name'] ?? 'N/A',
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'user_id': userId,
+      'Username': username,
+      'Account Category': accountCategory,
+      'Amount': amount,
+      'Platforms': platforms,
+      'Account Name': accountName,
+    };
+  }
+}
+
+class SettingsPage extends StatefulWidget {
   SettingsPage({
     super.key,
   });
+
+  @override
+  State<SettingsPage> createState() => _SettingsPageState();
+}
+
+class _SettingsPageState extends State<SettingsPage> {
+   Account? account;
+  bool isLoading = true;
+  String errorMessage = '';
+
+  @override
+  void initState() {
+    super.initState();
+    fetchAccountData();
+  }
+
+  Future<void> fetchAccountData() async {
+    final url = Uri.parse('https://wefundclient.com/Crm/Crm/Id_api.php');
+
+    try {
+      final response = await http.get(url);
+
+      if (response.statusCode == 200) {
+        final jsonData = json.decode(response.body);
+
+        if (jsonData is Map<String, dynamic>) {
+          setState(() {
+            account = Account.fromJson(jsonData);
+            isLoading = false;
+          });
+        } else {
+          throw Exception('Unexpected JSON format');
+        }
+      } else {
+        throw Exception('Failed to load account data. Status code: ${response.statusCode}');
+      }
+    } catch (e) {
+      setState(() {
+        isLoading = false;
+        errorMessage = 'Error: $e';
+      });
+      print('Fetch error: $e');
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final themeProvider = Provider.of<ThemeProvider>(context);
@@ -56,7 +147,7 @@ class SettingsPage extends StatelessWidget {
         'color': Colors.blue,
         'page': ClientPortalPage(),
       },
-       {
+      {
         'icon': Icons.face,
         'text': 'Funded Account',
         'color': Colors.blue,
@@ -104,22 +195,22 @@ class SettingsPage extends StatelessWidget {
     ];
 
     return Scaffold(
-      appBar: AppBar(
-        title: Text(
-          "Settings",
-          style: TextStyle(
-            fontSize: 22.px,
-            fontWeight: FontWeight.w700,
+        appBar: AppBar(
+          title: Text(
+            "Settings",
+            style: TextStyle(
+              fontSize: 22.px,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          centerTitle: true,
+          backgroundColor:
+              themeProvider.isDarkMode ? Colors.black : Colors.white,
+          iconTheme: IconThemeData(
+            color: themeProvider.isDarkMode ? Colors.white : Colors.black,
           ),
         ),
-        centerTitle: true,
-        backgroundColor: themeProvider.isDarkMode ? Colors.black : Colors.white,
-        iconTheme: IconThemeData(
-          color: themeProvider.isDarkMode ? Colors.white : Colors.black,
-        ),
-      ),
-      body: Column(
-        children: [
+        body: Column(children: [
           Column(
             children: [
               Image.asset(
@@ -166,146 +257,156 @@ class SettingsPage extends StatelessWidget {
                 ],
               ),
               SizedBox(height: 1.h),
-              Text("Ac No : 10009", style: TextStyle(fontSize: 16.px)),
-              Text("Balance : 0.00", style: TextStyle(fontSize: 16.px)),
-            ],
-          ),
-
-          // SETTINGS LIST
-          Expanded(
-            child: ListView.builder(
-              itemCount: settingsOptions.length,
-              itemBuilder: (context, index) {
-                var item = settingsOptions[index];
-
-                if (item.containsKey('divider')) {
-                  return Divider(
-                    thickness: 6.w,
-                    color: themeProvider.isDarkMode
-                        ? Colors.grey[800]
-                        : Colors.grey[300],
-                  );
-                }
-
-                if (item.containsKey('themeToggle')) {
-                  return ListTile(
-                      contentPadding: EdgeInsets.symmetric(
-                          horizontal: 16, vertical: 4), // Adjust padding
-
-                      leading: Container(
-                        width: 40, // Adjust as needed
-                        height: 40,
-                        decoration: BoxDecoration(
-                          color: Colors.red, // Background color
-                          borderRadius:
-                              BorderRadius.circular(8), // Rounded corners
-                        ),
-                        child: Padding(
-                          padding: const EdgeInsets.all(
-                              8.0), // Adjust padding if needed
-                          child: Image.asset(
-                            'assets/contrast.png', // Asset image
-                            fit: BoxFit.contain,
-                            color: Colors.white, // Make image white
-                          ),
-                        ),
-                      ),
-                      title: Text("Default Theme"),
-                      trailing: Container(
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(10),
-                          border: Border.all(
-                              color: Colors.grey.shade300), // Add light border
-                        ),
-                        child: ToggleButtons(
-                          borderColor: Colors.transparent,
-                          selectedBorderColor: Colors.grey.shade500,
-                          borderRadius: BorderRadius.circular(10),
-                          isSelected: [
-                            !themeProvider.isDarkMode,
-                            themeProvider.isDarkMode
-                          ],
-                          children: [
-                            Padding(
-                              padding: EdgeInsets.symmetric(
-                                  horizontal: 16, vertical: 8),
-                              child:
-                                  Text("Light", style: TextStyle(fontSize: 14)),
+                        
+                            Text(
+                           "Ac No : ${account?.accountName ?? 'N/A'}",
+                              style: TextStyle(fontSize: 16.px),
                             ),
-                            Padding(
-                              padding: EdgeInsets.symmetric(
-                                  horizontal: 16, vertical: 8),
-                              child:
-                                  Text("Dark", style: TextStyle(fontSize: 14)),
+                            Text(
+  "Balance : ₹${account?.amount ?? '0.00'}",
+                              style: TextStyle(fontSize: 16.px),
                             ),
                           ],
-                          onPressed: (index) {
-                            themeProvider.toggleTheme(
-                                index == 1); // Set dark mode if index is 1
-                          },
                         ),
-                      ));
-                }
+                     
+              Expanded(
+                child: ListView.builder(
+                  itemCount: settingsOptions.length,
+                  itemBuilder: (context, index) {
+                    var item = settingsOptions[index];
 
-                return ListTile(
-                    contentPadding:
-                        EdgeInsets.symmetric(horizontal: 17, vertical: 7),
-                    visualDensity: VisualDensity.compact,
-                    tileColor: Colors.transparent,
-                    shape: Border(
-                        bottom: BorderSide(
-                      color: Colors.grey.shade300,
-                      width: 0.8,
-                    )),
-                    leading: Container(
-                      width: 40,
-                      height: 40,
-                      decoration: BoxDecoration(
-                        color: item['color'], // Background color
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: item['icon'] is String
-                          ? Padding(
+                    if (item.containsKey('divider')) {
+                      return Divider(
+                        thickness: 6.w,
+                        color: themeProvider.isDarkMode
+                            ? Colors.grey[800]
+                            : Colors.grey[300],
+                      );
+                    }
+
+                    if (item.containsKey('themeToggle')) {
+                      return ListTile(
+                          contentPadding: EdgeInsets.symmetric(
+                              horizontal: 16, vertical: 4), // Adjust padding
+
+                          leading: Container(
+                            width: 40, // Adjust as needed
+                            height: 40,
+                            decoration: BoxDecoration(
+                              color: Colors.red, // Background color
+                              borderRadius:
+                                  BorderRadius.circular(8), // Rounded corners
+                            ),
+                            child: Padding(
                               padding: const EdgeInsets.all(
                                   8.0), // Adjust padding if needed
                               child: Image.asset(
-                                item['icon'],
+                                'assets/contrast.png', // Asset image
                                 fit: BoxFit.contain,
-                                color: Colors.white, // Apply white color tint
+                                color: Colors.white, // Make image white
                               ),
-                            )
-                          : Icon(item['icon'], color: Colors.white, size: 24),
-                    ),
-                    // White icon
+                            ),
+                          ),
+                          title: Text("Default Theme"),
+                          trailing: Container(
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(
+                                  color:
+                                      Colors.grey.shade300), // Add light border
+                            ),
+                            child: ToggleButtons(
+                              borderColor: Colors.transparent,
+                              selectedBorderColor: Colors.grey.shade500,
+                              borderRadius: BorderRadius.circular(10),
+                              isSelected: [
+                                !themeProvider.isDarkMode,
+                                themeProvider.isDarkMode
+                              ],
+                              children: [
+                                Padding(
+                                  padding: EdgeInsets.symmetric(
+                                      horizontal: 16, vertical: 8),
+                                  child: Text("Light",
+                                      style: TextStyle(fontSize: 14)),
+                                ),
+                                Padding(
+                                  padding: EdgeInsets.symmetric(
+                                      horizontal: 16, vertical: 8),
+                                  child: Text("Dark",
+                                      style: TextStyle(fontSize: 14)),
+                                ),
+                              ],
+                              onPressed: (index) {
+                                themeProvider.toggleTheme(
+                                    index == 1); // Set dark mode if index is 1
+                              },
+                            ),
+                          ));
+                    }
 
-                    title: Text(
-                      item['text'],
-                      style: TextStyle(fontSize: 18.px),
-                    ),
-                    trailing: Icon(Icons.arrow_forward_ios,
-                        size: 16.px, color: Colors.grey),
-                    onTap: () {
-                      if (item.containsKey('isDelete') &&
-                          item['isDelete'] == true) {
-                        _showDeleteConfirmationDialog(
-                            context); // Show delete confirmation dialog
-                      } else if (item.containsKey('isLogout') &&
-                          item['isLogout'] == true) {
-                        _showLogoutDialog(
-                            context); // Show logout confirmation dialog
-                      } else {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(builder: (context) => item['page']),
-                        );
-                      }
-                    });
-              },
-            ),
+                    return ListTile(
+                        contentPadding:
+                            EdgeInsets.symmetric(horizontal: 17, vertical: 7),
+                        visualDensity: VisualDensity.compact,
+                        tileColor: Colors.transparent,
+                        shape: Border(
+                            bottom: BorderSide(
+                          color: Colors.grey.shade300,
+                          width: 0.8,
+                        )),
+                        leading: Container(
+                          width: 40,
+                          height: 40,
+                          decoration: BoxDecoration(
+                            color: item['color'], // Background color
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: item['icon'] is String
+                              ? Padding(
+                                  padding: const EdgeInsets.all(
+                                      8.0), // Adjust padding if needed
+                                  child: Image.asset(
+                                    item['icon'],
+                                    fit: BoxFit.contain,
+                                    color:
+                                        Colors.white, // Apply white color tint
+                                  ),
+                                )
+                              : Icon(item['icon'],
+                                  color: Colors.white, size: 24),
+                        ),
+                        // White icon
+
+                        title: Text(
+                          item['text'],
+                          style: TextStyle(fontSize: 18.px),
+                        ),
+                        trailing: Icon(Icons.arrow_forward_ios,
+                            size: 16.px, color: Colors.grey),
+                        onTap: () {
+                          if (item.containsKey('isDelete') &&
+                              item['isDelete'] == true) {
+                            _showDeleteConfirmationDialog(
+                                context); // Show delete confirmation dialog
+                          } else if (item.containsKey('isLogout') &&
+                              item['isLogout'] == true) {
+                            _showLogoutDialog(
+                                context); // Show logout confirmation dialog
+                          } else {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                  builder: (context) => item['page']),
+                            );
+                          }
+                        });
+                  },
+                ),
+              ),
+            ],
           ),
-        ],
-      ),
-    );
+        );
   }
 
   void _showDeleteConfirmationDialog(BuildContext context) {
@@ -387,98 +488,6 @@ void _showLogoutDialog(BuildContext context) {
   );
 }
 
-
-class CopyTradingPage extends StatelessWidget {
-  final List<String> tradingSignals =
-      []; // Empty list to simulate "No User Found"
-
-  @override
-  Widget build(BuildContext context) {        final themeProvider = Provider.of<ThemeProvider>(context);
-
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(
-          "Trading Signals",
-       style: TextStyle(fontSize: 22.px, fontWeight: FontWeight.w700),
-            textAlign: TextAlign.center,
-          ),
-          centerTitle: true,
-          leading: IconButton(
-            icon: Icon(Icons.arrow_back_ios), // iOS-style back arrow
-            onPressed: () {
-              Navigator.pop(context);
-            },
-          ),
-            backgroundColor:
-              themeProvider.isDarkMode ? Colors.black : Colors.white,
-      ),
-      body: Column(
-        children: [
-          // TabBar for switching between Trading Signals and Following Signals
-          DefaultTabController(
-            length: 2,
-            child: Column(
-              children: [
-                TabBar(
-                  isScrollable: true, // Enables horizontal scrolling
-                  labelStyle: TextStyle(
-                    fontSize: 16.px,
-                    fontWeight: FontWeight.bold,
-                  ), // Selected tab text style
-                  unselectedLabelStyle:
-                      TextStyle(fontSize: 16.px, fontWeight: FontWeight.normal),
-                  tabs: [
-                    Tab(
-                      text: "TRADING SIGNALS",
-                    ),
-                    Tab(text: "FOLLOWING TRADING SIGNALS"),
-                  ],
-                ),
-                Padding(
-                  padding: const EdgeInsets.all(8.0),
-                  child: Container(
-                    color: Colors.transparent,
-                    height: 50.h, // Fixed height for TabBarView
-                    child: TabBarView(
-                      children: [
-                        _buildTradingSignals(),
-                        Center(
-                            child: Text(
-                          "No User Found",
-                          style: TextStyle(
-                              fontSize: 20.sp, fontWeight: FontWeight.w800),
-                        )), // Placeholder for following signals
-                      ],
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildTradingSignals() {
-    if (tradingSignals.isEmpty) {
-      return Center(
-          child: Text(
-        "No User Found",
-        style: TextStyle(fontSize: 20.sp, fontWeight: FontWeight.w800),
-      ));
-    }
-    return ListView.builder(
-      itemCount: tradingSignals.length,
-      itemBuilder: (context, index) {
-        return ListTile(
-          title: Text(tradingSignals[index]),
-        );
-      },
-    );
-  }
-}
-
 // class MAMPage extends StatelessWidget {
 //   @override
 //   Widget build(BuildContext context) {
@@ -489,264 +498,87 @@ class CopyTradingPage extends StatelessWidget {
 //   }
 // }
 
-class PAMMPage extends StatelessWidget {
-  final List<String> tradingSignals =
-      []; // Empty list to simulate "No User Found"
-
-  @override
-  Widget build(BuildContext context) {        final themeProvider = Provider.of<ThemeProvider>(context);
-
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(
-          "PAMM",
-          style: TextStyle(fontSize: 22.px, fontWeight: FontWeight.w700),
-            textAlign: TextAlign.center,
-          ),
-          centerTitle: true,
-          leading: IconButton(
-            icon: Icon(Icons.arrow_back_ios), // iOS-style back arrow
-            onPressed: () {
-              Navigator.pop(context);
-            },
-          ),
-            backgroundColor:
-              themeProvider.isDarkMode ? Colors.black : Colors.white,
-      ),
-      body: Column(
-        children: [
-          // TabBar for switching between Trading Signals and Following Signals
-          DefaultTabController(
-            length: 2,
-            child: Column(
-              children: [
-                TabBar(
-                  isScrollable: true, // Enables horizontal scrolling
-                  labelStyle: TextStyle(
-                    fontSize: 16.px,
-                    fontWeight: FontWeight.bold,
-                  ), // Selected tab text style
-                  unselectedLabelStyle:
-                      TextStyle(fontSize: 16.px, fontWeight: FontWeight.normal),
-
-                  tabs: [
-                    Tab(
-                      text: "PAMM USER LIST",
-                    ),
-                    Tab(text: "FOLLOWING PAMM LIST"),
-                  ],
-                ),
-                Container(
-                  color: Colors.transparent,
-                  height: 50.h, // Fixed height for TabBarView
-                  child: TabBarView(
-                    children: [
-                      _buildTradingSignals(),
-                      Center(
-                          child: Text(
-                        "No User Found",
-                        style: TextStyle(
-                            fontSize: 20.sp, fontWeight: FontWeight.w800),
-                      )), // Placeholder for following signals
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildTradingSignals() {
-    if (tradingSignals.isEmpty) {
-      return Center(
-          child: Text(
-        "No User Found",
-        style: TextStyle(fontSize: 20.sp, fontWeight: FontWeight.w800),
-      ));
-    }
-    return ListView.builder(
-      itemCount: tradingSignals.length,
-      itemBuilder: (context, index) {
-        return ListTile(
-          title: Text(tradingSignals[index]),
-        );
-      },
-    );
-  }
-}
-
 class ClientPortalPage extends StatelessWidget {
-  const ClientPortalPage({
-    super.key,
-  });
+  const ClientPortalPage({super.key});
 
-  @override
-  Widget build(BuildContext context) {
-      final themeProvider = Provider.of<ThemeProvider>(context);
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(
-          "Client Portal",
-          style: TextStyle(fontSize: 22.px, fontWeight: FontWeight.w700),
-            textAlign: TextAlign.center,
-          ),
-          centerTitle: true,
-          leading: IconButton(
-            icon: Icon(Icons.arrow_back_ios), // iOS-style back arrow
-            onPressed: () {
-              Navigator.pop(context);
-            },
-          ),
-            backgroundColor:
-              themeProvider.isDarkMode ? Colors.black : Colors.white,
-      ),
-      body: SafeArea(
-        child: Center(
-          child: Padding(
-            padding: const EdgeInsets.all(8.0),
-            child: Container(
-              height:
-                  MediaQuery.of(context).size.height * 0.4, // ✅ Dynamic height
-              width: double.infinity,
-              decoration: BoxDecoration(
-                color: Colors.grey,
-                borderRadius: BorderRadius.circular(8), // ✅ Removed `.sp`
-              ),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Container(
-                    height: 100, // Adjust size as needed
-                    width: 100,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: Colors.grey[300], // Background color
-                      image: DecorationImage(
-                        image:
-                            AssetImage("assets/1.png"), // ✅ Ensure image exists
-                        fit: BoxFit.cover,
-                      ),
-                    ),
-                  ),
+  Future<void> _launchURL() async {
+    final Uri uri = Uri.parse('https://www.wefundglobalfx.com/copy-traders');
 
-                  SizedBox(height: 20), // Space between image and button
-
-                  // Create Account Button
-                  ElevatedButton(
-                    onPressed: () {
-                      // Navigate to the next page
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => NextPage(),
-                        ),
-                      );
-                    },
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.blue, // Button color
-                      padding:
-                          EdgeInsets.symmetric(horizontal: 30, vertical: 12),
-                      shape: RoundedRectangleBorder(
-                        borderRadius:
-                            BorderRadius.circular(10), // Rounded corners
-                      ),
-                    ),
-                    child: Text(
-                      "Create Account",
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.white,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(
+        uri,
+        mode: LaunchMode.externalApplication, // Open in browser
+      );
+    } else {
+      debugPrint("Could not open the link: $uri");
+    }
   }
-}
-
-
-class FundAccount extends StatefulWidget {
-  const FundAccount({super.key});
-
-  @override
-  State<FundAccount> createState() => _FundAccountState();
-}
-
-class _FundAccountState extends State<FundAccount> {
-  // Dummy list of balances (Replace with actual data source)
-  final List<Map<String, dynamic>> balances = [
-    {"account": "Bank Account", "balance": 5000.00, "currency": "USD"},
-    {"account": "Wallet", "balance": 1500.75, "currency": "USD"},
-    {"account": "Crypto Account", "balance": 2.5, "currency": "BTC"},
-  ];
 
   @override
   Widget build(BuildContext context) {
-    final themeProvider = Provider.of<ThemeProvider>(context);
-
     return Scaffold(
       appBar: AppBar(
-        title: Text(
-          "Funded Account",
+        title: const Text(
+          "Client Portal",
           style: TextStyle(fontSize: 22, fontWeight: FontWeight.w700),
           textAlign: TextAlign.center,
         ),
         centerTitle: true,
         leading: IconButton(
-          icon: Icon(Icons.arrow_back_ios), // iOS-style back arrow
+          icon: const Icon(Icons.arrow_back_ios), // iOS-style back arrow
           onPressed: () {
             Navigator.pop(context);
           },
         ),
-        backgroundColor: themeProvider.isDarkMode ? Colors.black : Colors.white,
+        backgroundColor: Colors.white,
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              "Your Balances",
-              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-            ),
-            SizedBox(height: 10),
-            Expanded(
-              child: ListView.builder(
-                itemCount: balances.length,
-                itemBuilder: (context, index) {
-                  final item = balances[index];
-                  return Card(
-                    elevation: 3,
-                    margin: EdgeInsets.symmetric(vertical: 8),
-                    child: ListTile(
-                      leading: Icon(Icons.account_balance_wallet, color: Colors.blue),
-                      title: Text(item["account"], style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
-                      subtitle: Text("Balance: ${item["balance"]} ${item["currency"]}",
-                          style: TextStyle(fontSize: 16, color: Colors.grey[700])),
-                      trailing: Icon(Icons.arrow_forward_ios, color: Colors.blue),
-                      onTap: () {
-                        // Handle sending balance or navigation to details
-                      },
-                    ),
-                  );
-                },
+      body: SafeArea(
+        child: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              // Profile Image
+              Container(
+                height: 20.h,
+                width: 40.w,
+                decoration: const BoxDecoration(
+                  shape: BoxShape.circle,
+                  image: DecorationImage(
+                    image: AssetImage("assets/1.png"), // Ensure image exists
+                    fit: BoxFit.cover,
+                  ),
+                ),
               ),
-            ),
-          ],
+              SizedBox(height: 3.h), // Space between image and button
+
+              // Create Account Button
+              ElevatedButton(
+                onPressed: _launchURL,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.blue,
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 30, vertical: 12),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
+                child: const Text(
+                  "Create Account",
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white,
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
   }
 }
+
 
 // Dummy Next Page
 class NextPage extends StatefulWidget {
@@ -1224,25 +1056,71 @@ class PrivacyPolicyPage extends StatelessWidget {
 class AartiCapitalDetailsPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
-      final themeProvider = Provider.of<ThemeProvider>(context);
+    final themeProvider = Provider.of<ThemeProvider>(context);
+
+    // Sample data for accounts
+    final List<Map<String, String>> accounts = [
+      {"accountNo": "10009", "balance": "0.00"},
+      {"accountNo": "10011", "balance": "0.00"},
+      {"accountNo": "10010", "balance": "9999.60"},
+    ];
+
     return Scaffold(
-      appBar: AppBar(title: Text("Aarti Capital Details" ,style: TextStyle(fontSize: 22.px, fontWeight: FontWeight.w700),
-            textAlign: TextAlign.center,
-          ),
-          centerTitle: true,
-          leading: IconButton(
-            icon: Icon(Icons.arrow_back_ios), // iOS-style back arrow
-            onPressed: () {
-              Navigator.pop(context);
-            },
-          ),
-            backgroundColor:
-              themeProvider.isDarkMode ? Colors.black : Colors.white,
+      appBar: AppBar(
+        title: const Text(
+          "Account List",
+          style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+        ),
+        centerTitle: true,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_ios),
+          onPressed: () {
+            Navigator.pop(context);
+          },
+        ),
+        backgroundColor: themeProvider.isDarkMode ? Colors.black : Colors.white,
+        iconTheme: IconThemeData(
+            color: themeProvider.isDarkMode ? Colors.white : Colors.black),
       ),
-      body: Center(
-        child: Text(
-          "Welcome to Aarti Capital Details Page",
-          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+      body: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            const Text(
+              "Welcome WeFundedFX",
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 20),
+            Expanded(
+              child: ListView.builder(
+                itemCount: accounts.length,
+                itemBuilder: (context, index) {
+                  final account = accounts[index];
+                  return Card(
+                    elevation: 2,
+                    margin: const EdgeInsets.symmetric(vertical: 8),
+                    child: ListTile(
+                      leading: CircleAvatar(
+                        backgroundColor: Colors.green,
+                        child: Icon(Icons.person, color: Colors.white),
+                      ),
+                      title: Text(
+                        "Account No : ${account['accountNo']}",
+                        style: const TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                      subtitle: Text("Balance : ${account['balance']}"),
+                      trailing: const Icon(Icons.arrow_forward_ios),
+                      onTap: () {
+                        // Handle on tap
+                      },
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
         ),
       ),
     );

@@ -3,6 +3,8 @@ import 'package:provider/provider.dart';
 import 'package:sizer/sizer.dart';
 import 'package:wefund/SettingsPage.dart';
 import 'package:wefund/ThemeProvider.dart';
+import 'package:wefund/copytreding.dart';
+import 'package:wefund/pamm.dart';
 
 class DashboardPage extends StatefulWidget {
   @override
