@@ -26,3 +26,9 @@ jobs:
 
       - name: Build for Simulator
         run: flutter build ios --simulator
+
+      - name: Upload Simulator .app
+        uses: actions/upload-artifact@v2
+        with:
+          name: ios-simulator-app
+          path: build/ios/iphonesimulator/Runner.app
