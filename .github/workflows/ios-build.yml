@@ -11,24 +11,22 @@ jobs:
     runs-on: macos-latest
 
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-    - name: Setup Flutter
-      uses: subosito/flutter-action@v2
-      with:
-        flutter-version: 'stable'
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 'stable'
 
-    - name: Install dependencies
-      run: flutter pub get
+      - name: Install dependencies
+        run: flutter pub get
 
-    - name: Build iOS IPA
-      run: flutter build ipa --export-method ad-hoc
-      # for App Store builds use: --export-method app-store
+      - name: Build for Simulator   # no signing required
+        run: flutter build ios --simulator
 
-    - name: Upload artifact
-      uses: actions/upload-artifact@v3
-      with:
-        name: wefund-ios
-        path: build/ios/ipa/*.ipa
-# Add GitHub Actions iOS build workflow
+      - name: Upload Simulator build
+        uses: actions/upload-artifact@v2
+        with:
+          name: wefund-sim-app
+          path: build/ios/iphonesimulator/Runner.app
