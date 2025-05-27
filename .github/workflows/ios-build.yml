@@ -1,0 +1,34 @@
+name: Build iOS
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build_ios:
+    runs-on: macos-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Flutter
+      uses: subosito/flutter-action@v2
+      with:
+        flutter-version: 'stable'
+
+    - name: Install dependencies
+      run: flutter pub get
+
+    - name: Build iOS IPA
+      run: flutter build ipa --export-method ad-hoc
+      # for App Store builds use: --export-method app-store
+
+    - name: Upload artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: wefund-ios
+        path: build/ios/ipa/*.ipa
+# Add GitHub Actions iOS build workflow
