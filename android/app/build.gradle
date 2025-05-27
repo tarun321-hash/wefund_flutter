@@ -6,8 +6,9 @@ plugins {
 }
 
 android {
-    namespace = "com.example.wefund"
+    
     compileSdk = flutter.compileSdkVersion
+    namespace = 'com.example.wefund'
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
@@ -37,6 +38,12 @@ android {
             signingConfig = signingConfigs.debug
         }
     }
+}
+
+// Tell Gradle COPY tasks to skip duplicates instead of failing
+afterEvaluate {
+  tasks.matching { it.name.startsWith('copyFlutterAssets') }
+       .configureEach { duplicatesStrategy = DuplicatesStrategy.EXCLUDE }
 }
 
 flutter {

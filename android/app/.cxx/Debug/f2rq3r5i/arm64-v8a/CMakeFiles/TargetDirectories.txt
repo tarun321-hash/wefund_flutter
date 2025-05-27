@@ -1,0 +1,2 @@
+F:/wefund/android/app/.cxx/Debug/f2rq3r5i/arm64-v8a/CMakeFiles/edit_cache.dir
+F:/wefund/android/app/.cxx/Debug/f2rq3r5i/arm64-v8a/CMakeFiles/rebuild_cache.dir

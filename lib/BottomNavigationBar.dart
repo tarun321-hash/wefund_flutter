@@ -9,25 +9,38 @@ import 'package:wefund/Watchlist.dart';
 
 class BottomNavigationBarWidget extends StatefulWidget {
 
-
-  const BottomNavigationBarWidget({super.key,});
+ final String jwt;
+  final int initialIndex;
+  const BottomNavigationBarWidget({
+    Key? key,
+    required this.jwt,
+    this.initialIndex = 0,
+  }) : super(key: key);
 
   @override
   _BottomNavigationBarWidgetState createState() => _BottomNavigationBarWidgetState();
 }
 
 class _BottomNavigationBarWidgetState extends State<BottomNavigationBarWidget> {
-  int _currentIndex = 4;
+  late int _currentIndex;
+  
+  @override
+   void initState() {
+     super.initState();
+     // start on whatever tab the parent told us
+     _currentIndex = widget.initialIndex;
+   }
 
   @override
   Widget build(BuildContext context) {
         final themeProvider = Provider.of<ThemeProvider>(context);
 
-    List<Widget> _pages = [
+    final _pages = [
       Watchlist(),
       Chart(),
-      Positions(),
-      History(),
+      PositionsPage(jwt: widget.jwt),
+      HistoryPage(jwt: widget.jwt),
+      
       SettingsPage(),
     ];
 
@@ -36,20 +49,17 @@ class _BottomNavigationBarWidgetState extends State<BottomNavigationBarWidget> {
 
       body: _pages[_currentIndex],
       bottomNavigationBar: BottomNavigationBar(
-        onTap: (index) {
-          setState(() {
-            _currentIndex = index;
-          });
-        },
         currentIndex: _currentIndex,
-     backgroundColor: themeProvider.isDarkMode ? Colors.black : Colors.white,
-        unselectedItemColor: Colors.grey ,
-        selectedItemColor: Colors.blue,
+        onTap: (i) => setState(() => _currentIndex = i),
         type: BottomNavigationBarType.fixed,
-        items: [
+        backgroundColor:
+            themeProvider.isDarkMode ? Colors.black : Colors.white,
+        selectedItemColor: Colors.blue,
+        unselectedItemColor: Colors.grey,
+        items: const [
           BottomNavigationBarItem(icon: Icon(Icons.list), label: 'Watchlist'),
           BottomNavigationBarItem(icon: Icon(Icons.show_chart), label: 'Chart'),
-          BottomNavigationBarItem(icon: Icon(Icons.business), label: 'Positions'),
+          BottomNavigationBarItem(icon: Icon(Icons.business_center), label: 'Positions'),
           BottomNavigationBarItem(icon: Icon(Icons.history), label: 'History'),
           BottomNavigationBarItem(icon: Icon(Icons.settings), label: 'Settings'),
         ],

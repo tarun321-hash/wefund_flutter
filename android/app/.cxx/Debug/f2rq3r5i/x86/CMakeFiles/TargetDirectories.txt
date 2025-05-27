@@ -1,0 +1,2 @@
+F:/wefund/android/app/.cxx/Debug/f2rq3r5i/x86/CMakeFiles/edit_cache.dir
+F:/wefund/android/app/.cxx/Debug/f2rq3r5i/x86/CMakeFiles/rebuild_cache.dir

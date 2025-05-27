@@ -10,49 +10,38 @@ import 'package:wefund/BottomNavigationBar.dart';
 import 'package:wefund/DashboardPage.dart';
 import 'package:wefund/IntroducingBrokerPage.dart';
 import 'package:wefund/ThemeProvider.dart';
-import 'package:wefund/copytreding.dart';
-import 'package:wefund/fundscree.dart';
+import 'package:wefund/copytrading.dart';
+import 'package:wefund/funded_account_page.dart';
 import 'package:wefund/fundspage.dart';
 import 'package:wefund/pamm.dart';
 import 'package:wefund/setting.dart';
+import 'package:wefund/client_portal_page.dart';
+import 'package:wefund/account_provider.dart';
+import 'package:wefund/api/login.dart';
+
+import 'package:shared_preferences/shared_preferences.dart';
+
 
 class Account {
   int? userId;
-  String? username;
-  String? accountCategory;
+  String? accountNumber;
   String? amount;
-  String? platforms;
-  String? accountName;
 
-  Account({
-    this.userId,
-    this.username,
-    this.accountCategory,
-    this.amount,
-    this.platforms,
-    this.accountName,
-  });
+  Account({this.userId, this.accountNumber, this.amount});
 
-  factory Account.fromJson(Map<String, dynamic> json) {
-    return Account(
-      userId: json['user_id'] != null ? int.tryParse(json['user_id'].toString()) : null,
-      username: json['Username'] ?? 'Unknown',
-      accountCategory: json['Account Category'] ?? 'N/A',
-      amount: json['Amount'] ?? '0.00',
-      platforms: json['Platforms'] ?? 'N/A',
-      accountName: json['Account Name'] ?? 'N/A',
-    );
+  Account.fromJson(Map<String, dynamic> json) {
+    userId = json['user_id'] != null
+        ? int.tryParse(json['user_id'].toString())
+        : null;
+    accountNumber = json['account_number']?.toString() ?? 'N/A';
+    amount = json['amount']?.toString() ?? 'N/A';
   }
 
   Map<String, dynamic> toJson() {
-    return {
-      'user_id': userId,
-      'Username': username,
-      'Account Category': accountCategory,
-      'Amount': amount,
-      'Platforms': platforms,
-      'Account Name': accountName,
-    };
+    final Map<String, dynamic> data = Map<String, dynamic>();
+    data['account_number'] = accountNumber;
+    data['amount'] = amount;
+    return data;
   }
 }
 
@@ -66,48 +55,188 @@ class SettingsPage extends StatefulWidget {
 }
 
 class _SettingsPageState extends State<SettingsPage> {
-   Account? account;
+  Account? account;
+    // ── live P&L fields ─────────────────────────────
+  bool _liveLoading    = true;
+  String? _liveError;
+  double _liveBalance  = 0.0;
+  // double _liveEquity   = 0.0;
+  // double _liveFreeMargin = 0.0;
+
   bool isLoading = true;
   String errorMessage = '';
 
-  @override
-  void initState() {
-    super.initState();
-    fetchAccountData();
+    @override
+void initState() {
+  super.initState();
+  // load which account was selected
+  context.read<AccountProvider>().loadFromPrefs();
+  // 1) your old account‐list loader
+  fetchAccountData().then((_) {
+    // 2) then hit the live‐balance API
+    _fetchLiveBalance();
+  });
+}
+
+  // @override
+  // void didChangeDependencies() {
+  //   super.didChangeDependencies();
+  //   // if your account selection can change, re-fetch live PnL
+  //    _fetchLiveBalance();
+  // }
+
+  Future<void> _fetchLiveBalance() async {
+  setState(() {
+    _liveLoading = true;
+    _liveError   = null;
+  });
+
+  try {
+    final prefs  = await SharedPreferences.getInstance();
+    final jwt    = prefs.getString('jwt') ?? '';
+    final userId = prefs.getInt('selectedUserId');
+    if (userId == null) throw Exception('No account selected');
+
+    final resp = await http.post(
+      Uri.parse('https://wefundclient.com/Crm/Crm/sync_balance.php'),
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer $jwt',
+      },
+      body: jsonEncode({ 'userId': userId }),
+    );
+
+    if (resp.statusCode != 200) {
+      throw Exception('HTTP ${resp.statusCode}');
+    }
+
+    final Map<String, dynamic> result = jsonDecode(resp.body);
+    if (result['status'] != 'ok') {
+      throw Exception(result['message'] ?? 'Unknown sync error');
+    }
+
+    setState(() {
+      _liveBalance = (result['balance'] as num).toDouble();
+      _liveLoading = false;
+    });
+  } catch (e) {
+    setState(() {
+      _liveError   = e.toString();
+      _liveLoading = false;
+    });
   }
+}
+
+
+
+  // Future<void> fetchAccountData() async {
+  //   try {
+  //     final response = await http.get(
+  //       Uri.parse('https://wefundclient.com/Crm/Crm/accbal_api.php'),
+  //     );
+
+  //     if (response.statusCode == 200) {
+  //       final jsonData = json.decode(response.body);
+  //       setState(() {
+  //         account = Account.fromJson(jsonData);
+  //         isLoading = false;
+  //         errorMessage = '';
+  //       });
+  //     } else {
+  //       setState(() {
+  //         isLoading = false;
+  //         errorMessage = 'Server error: ${response.statusCode}';
+  //       });
+  //     }
+  //   } catch (e) {
+  //     setState(() {
+  //       isLoading = false;
+  //       errorMessage = 'Error: $e';
+  //     });
+  //   }
+  // }
+
+
+    
+
+
 
   Future<void> fetchAccountData() async {
-    final url = Uri.parse('https://wefundclient.com/Crm/Crm/Id_api.php');
+  setState(() {
+    isLoading = true;
+    errorMessage = '';
+  });
 
-    try {
-      final response = await http.get(url);
-
-      if (response.statusCode == 200) {
-        final jsonData = json.decode(response.body);
-
-        if (jsonData is Map<String, dynamic>) {
-          setState(() {
-            account = Account.fromJson(jsonData);
-            isLoading = false;
-          });
-        } else {
-          throw Exception('Unexpected JSON format');
-        }
-      } else {
-        throw Exception('Failed to load account data. Status code: ${response.statusCode}');
+  try {
+   // 1) read saved email
+      final prefs = await SharedPreferences.getInstance();
+      final email = prefs.getString('email') ?? '';
+      final selectedAcct = prefs.getString('selectedAccountNumber');
+      if (email.isEmpty) {
+        setState(() {
+          errorMessage = 'No logged-in email found.';
+          isLoading = false;
+        });
+        return;
       }
-    } catch (e) {
-      setState(() {
-        isLoading = false;
-        errorMessage = 'Error: $e';
-      });
-      print('Fetch error: $e');
+
+      // 2) call POST /accbal_api.php
+      final response = await http.post(
+        Uri.parse('https://wefundclient.com/Crm/Crm/accbal_api.php'),
+        headers: {'Content-Type': 'application/json'},
+        body: json.encode({'email': email}),
+    );
+
+    // 3) handle response
+    if (response.statusCode != 200) {
+      throw Exception('Server error: ${response.statusCode}');
     }
+
+    final List<dynamic> data = json.decode(response.body);
+    if (data.isEmpty) {
+      throw Exception('No account data returned');
+    }
+
+    // pick the user‐chosen account, or default to the first
+    final Map<String, dynamic> chosen = (selectedAcct != null && selectedAcct.isNotEmpty)
+      ? data.cast<Map<String, dynamic>>().firstWhere(
+          (e) => e['account_number']?.toString() == selectedAcct,
+          orElse: () => data.first as Map<String, dynamic>,
+        )
+      : data.first as Map<String, dynamic>;
+
+    setState(() {
+      account   = Account.fromJson(chosen);
+      isLoading = false;
+    });
+  } catch (e) {
+    setState(() {
+      errorMessage = 'Error: $e';
+      isLoading    = false;
+    });
+  }
+}
+
+
+
+
+
+  Future<void> _refreshData() async {
+    setState(() {
+      isLoading = true;
+    });
+    await fetchAccountData();
   }
 
   @override
   Widget build(BuildContext context) {
+    final acctProv = context.watch<AccountProvider>();
     final themeProvider = Provider.of<ThemeProvider>(context);
+    // ── NEW: turn your stored String into a double (or fallback to the raw string) ──
+    final raw = acctProv.current?.balance ?? '0';
+final storedBalanceText = double.tryParse(raw) != null
+    ? double.parse(raw).toStringAsFixed(2)
+    : raw;
 
     final List<Map<String, dynamic>> settingsOptions = [
       {
@@ -126,9 +255,10 @@ class _SettingsPageState extends State<SettingsPage> {
         'icon': Icons.attach_money,
         'text': 'Funds',
         'color': Colors.amber,
-        'page': FundsPage()
+        'isFunds': true,
+        'page': SizedBox(),
       },
-      {'divider': true},
+      // {'divider': true},
       {
         'icon': 'assets/crown.png', // Path to image
         'text': 'Copy Trading',
@@ -148,12 +278,12 @@ class _SettingsPageState extends State<SettingsPage> {
         'page': ClientPortalPage(),
       },
       {
-        'icon': Icons.face,
+        'icon': Icons.account_balance_wallet,
         'text': 'Funded Account',
         'color': Colors.blue,
-        'page': FundAccount(),
+        'page': FundedAccountPage(),
       },
-      {'divider': true},
+      // {'divider': true},
       {
         'icon': Icons.settings,
         'text': 'Settings',
@@ -195,26 +325,29 @@ class _SettingsPageState extends State<SettingsPage> {
     ];
 
     return Scaffold(
-        appBar: AppBar(
-          title: Text(
-            "Settings",
-            style: TextStyle(
-              fontSize: 22.px,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-          centerTitle: true,
-          backgroundColor:
-              themeProvider.isDarkMode ? Colors.black : Colors.white,
-          iconTheme: IconThemeData(
-            color: themeProvider.isDarkMode ? Colors.white : Colors.black,
+      backgroundColor: themeProvider.isDarkMode
+      ? Colors.black
+      : Colors.white,              // ← add this line
+      appBar: AppBar(
+        title: Text(
+          "Settings",
+          style: TextStyle(
+            fontSize: 22.px,
+            fontWeight: FontWeight.w700,
           ),
         ),
-        body: Column(children: [
+        centerTitle: true,
+        backgroundColor: themeProvider.isDarkMode ? Colors.black : Colors.white,
+        iconTheme: IconThemeData(
+          color: themeProvider.isDarkMode ? Colors.white : Colors.black,
+        ),
+      ),
+      body: Column(
+        children: [
           Column(
             children: [
               Image.asset(
-                "assets/1.png",
+                "assets/logo.png",
                 scale: 9.sp,
               ),
               SizedBox(height: 0.5.h),
@@ -232,7 +365,7 @@ class _SettingsPageState extends State<SettingsPage> {
                         },
                         child: Padding(
                           padding: const EdgeInsets.only(left: 30),
-                          child: Text("WEFUND - Live",
+                          child: Text("WEFUNDEDFX",
                               style: TextStyle(
                                   fontSize: 16.px,
                                   fontWeight: FontWeight.normal)),
@@ -257,235 +390,275 @@ class _SettingsPageState extends State<SettingsPage> {
                 ],
               ),
               SizedBox(height: 1.h),
-                        
-                            Text(
-                           "Ac No : ${account?.accountName ?? 'N/A'}",
-                              style: TextStyle(fontSize: 16.px),
-                            ),
-                            Text(
-  "Balance : ₹${account?.amount ?? '0.00'}",
-                              style: TextStyle(fontSize: 16.px),
-                            ),
-                          ],
-                        ),
-                     
-              Expanded(
-                child: ListView.builder(
-                  itemCount: settingsOptions.length,
-                  itemBuilder: (context, index) {
-                    var item = settingsOptions[index];
 
-                    if (item.containsKey('divider')) {
-                      return Divider(
-                        thickness: 6.w,
-                        color: themeProvider.isDarkMode
-                            ? Colors.grey[800]
-                            : Colors.grey[300],
-                      );
-                    }
+Padding(
+  padding: const EdgeInsets.symmetric(vertical: 8),
+  child: Column(
+    children: [
+      // 1) Account number
+      Text(
+        'Ac No : ${acctProv.current?.number ?? '–'}',
+        style: TextStyle(
+          fontSize: 16, fontWeight: FontWeight.bold, color: Colors.teal
+        ),
+      ),
 
-                    if (item.containsKey('themeToggle')) {
-                      return ListTile(
-                          contentPadding: EdgeInsets.symmetric(
-                              horizontal: 16, vertical: 4), // Adjust padding
+      const SizedBox(height: 4),
 
-                          leading: Container(
-                            width: 40, // Adjust as needed
-                            height: 40,
-                            decoration: BoxDecoration(
-                              color: Colors.red, // Background color
-                              borderRadius:
-                                  BorderRadius.circular(8), // Rounded corners
-                            ),
-                            child: Padding(
-                              padding: const EdgeInsets.all(
-                                  8.0), // Adjust padding if needed
-                              child: Image.asset(
-                                'assets/contrast.png', // Asset image
-                                fit: BoxFit.contain,
-                                color: Colors.white, // Make image white
-                              ),
-                            ),
-                          ),
-                          title: Text("Default Theme"),
-                          trailing: Container(
-                            decoration: BoxDecoration(
-                              borderRadius: BorderRadius.circular(10),
-                              border: Border.all(
-                                  color:
-                                      Colors.grey.shade300), // Add light border
-                            ),
-                            child: ToggleButtons(
-                              borderColor: Colors.transparent,
-                              selectedBorderColor: Colors.grey.shade500,
-                              borderRadius: BorderRadius.circular(10),
-                              isSelected: [
-                                !themeProvider.isDarkMode,
-                                themeProvider.isDarkMode
-                              ],
-                              children: [
-                                Padding(
-                                  padding: EdgeInsets.symmetric(
-                                      horizontal: 16, vertical: 8),
-                                  child: Text("Light",
-                                      style: TextStyle(fontSize: 14)),
-                                ),
-                                Padding(
-                                  padding: EdgeInsets.symmetric(
-                                      horizontal: 16, vertical: 8),
-                                  child: Text("Dark",
-                                      style: TextStyle(fontSize: 14)),
-                                ),
-                              ],
-                              onPressed: (index) {
-                                themeProvider.toggleTheme(
-                                    index == 1); // Set dark mode if index is 1
-                              },
-                            ),
-                          ));
-                    }
+      // 2) Balance (fall back to storedBalanceText on error)
+      Text(
+        'Balance : \$${_liveLoading || _liveError != null 
+            ? storedBalanceText 
+            : _liveBalance.toStringAsFixed(2)}',
+        style: TextStyle(
+          fontSize: 16,
+          fontWeight: FontWeight.bold,
+          // show teal if live succeeded, grey if loading, orange if error
+          color: _liveLoading
+            ? Colors.grey
+            : (_liveError != null ? Colors.orange : Colors.teal),
+        ),
+      ),
+    ],
+  ),
+),
 
-                    return ListTile(
-                        contentPadding:
-                            EdgeInsets.symmetric(horizontal: 17, vertical: 7),
-                        visualDensity: VisualDensity.compact,
-                        tileColor: Colors.transparent,
-                        shape: Border(
-                            bottom: BorderSide(
-                          color: Colors.grey.shade300,
-                          width: 0.8,
-                        )),
-                        leading: Container(
-                          width: 40,
-                          height: 40,
-                          decoration: BoxDecoration(
-                            color: item['color'], // Background color
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: item['icon'] is String
-                              ? Padding(
-                                  padding: const EdgeInsets.all(
-                                      8.0), // Adjust padding if needed
-                                  child: Image.asset(
-                                    item['icon'],
-                                    fit: BoxFit.contain,
-                                    color:
-                                        Colors.white, // Apply white color tint
-                                  ),
-                                )
-                              : Icon(item['icon'],
-                                  color: Colors.white, size: 24),
-                        ),
-                        // White icon
 
-                        title: Text(
-                          item['text'],
-                          style: TextStyle(fontSize: 18.px),
-                        ),
-                        trailing: Icon(Icons.arrow_forward_ios,
-                            size: 16.px, color: Colors.grey),
-                        onTap: () {
-                          if (item.containsKey('isDelete') &&
-                              item['isDelete'] == true) {
-                            _showDeleteConfirmationDialog(
-                                context); // Show delete confirmation dialog
-                          } else if (item.containsKey('isLogout') &&
-                              item['isLogout'] == true) {
-                            _showLogoutDialog(
-                                context); // Show logout confirmation dialog
-                          } else {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                  builder: (context) => item['page']),
-                            );
-                          }
-                        });
-                  },
-                ),
-              ),
+
+
             ],
           ),
-        );
+
+
+          Expanded(
+            child: ListView.builder(
+              itemCount: settingsOptions.length,
+              itemBuilder: (context, index) {
+                var item = settingsOptions[index];
+
+                if (item.containsKey('divider')) {
+                  return Divider(
+                    thickness: 0.w,
+                    color: themeProvider.isDarkMode
+                        ? Colors.grey[800]
+                        : Colors.grey[300],
+                  );
+                }
+
+                if (item.containsKey('themeToggle')) {
+                  return ListTile(
+                      contentPadding: EdgeInsets.symmetric(
+                          horizontal: 16, vertical: 4), // Adjust padding
+
+                      leading: Container(
+                        width: 40, // Adjust as needed
+                        height: 40,
+                        decoration: BoxDecoration(
+                          color: Colors.red, // Background color
+                          borderRadius:
+                              BorderRadius.circular(8), // Rounded corners
+                        ),
+                        child: Padding(
+                          padding: const EdgeInsets.all(
+                              8.0), // Adjust padding if needed
+                          child: Image.asset(
+                            'assets/contrast.png', // Asset image
+                            fit: BoxFit.contain,
+                            color: Colors.white, // Make image white
+                          ),
+                        ),
+                      ),
+                      title: Text("Default Theme"),
+                      trailing: Container(
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(
+                              color: Colors.grey.shade300), // Add light border
+                        ),
+                        child: ToggleButtons(
+                          borderColor: Colors.transparent,
+                          selectedBorderColor: Colors.grey.shade500,
+                          borderRadius: BorderRadius.circular(10),
+                          isSelected: [
+                            !themeProvider.isDarkMode,
+                            themeProvider.isDarkMode
+                          ],
+                          children: [
+                            Padding(
+                              padding: EdgeInsets.symmetric(
+                                  horizontal: 16, vertical: 8),
+                              child:
+                                  Text("Light", style: TextStyle(fontSize: 14)),
+                            ),
+                            Padding(
+                              padding: EdgeInsets.symmetric(
+                                  horizontal: 16, vertical: 8),
+                              child:
+                                  Text("Dark", style: TextStyle(fontSize: 14)),
+                            ),
+                          ],
+                          onPressed: (index) {
+                            themeProvider.toggleTheme(
+                                index == 1); // Set dark mode if index is 1
+                          },
+                        ),
+                      ));
+                }
+
+                return ListTile(
+  contentPadding: EdgeInsets.symmetric(horizontal: 17, vertical: 7),
+  visualDensity: VisualDensity.compact,
+  tileColor: Colors.transparent,
+  shape: Border(
+    bottom: BorderSide(color: Colors.grey.shade300, width: 0.8),
+  ),
+  leading: Container(
+    width: 40,
+    height: 40,
+    decoration: BoxDecoration(
+      color: item['color'],
+      borderRadius: BorderRadius.circular(8),
+    ),
+    child: item['icon'] is String
+        ? Padding(
+            padding: const EdgeInsets.all(8.0),
+            child: Image.asset(item['icon'], fit: BoxFit.contain, color: Colors.white),
+          )
+        : Icon(item['icon'], color: Colors.white, size: 24),
+  ),
+  title: Text(item['text'], style: TextStyle(fontSize: 18.px)),
+  trailing: Icon(Icons.arrow_forward_ios, size: 16.px, color: Colors.grey),
+  onTap: () async {
+  if (item['isDelete'] == true) {
+    _showDeleteConfirmationDialog(context);
+  } else if (item['isLogout'] == true) {
+    _showLogoutDialog(context);
+  } else if (item['isFunds'] == true) {
+    // load the saved JWT:
+    final prefs = await SharedPreferences.getInstance();
+    final jwt = prefs.getString('jwt') ?? '';
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => FundsPage(jwt: jwt)),
+    );
+  } else {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => item['page']),
+    );
+  }
+},
+
+);
+              },
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
-  void _showDeleteConfirmationDialog(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          title: Text(" Delete Account"),
-          content: Text("Do you wish to close the account?"),
-          actions: [
-            Container(
-              decoration: BoxDecoration(
-                color: Colors.grey[300], // Grey background for cancel
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: TextButton(
-                onPressed: () {
-                  Navigator.pop(context); // Close dialog
-                },
-                child: Text("CANCEL", style: TextStyle(color: Colors.blue)),
-              ),
-            ),
-            Container(
-              decoration: BoxDecoration(
-                color: Colors.orange, // Orange background for delete
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: TextButton(
-                onPressed: () {
-                  Navigator.pop(context); // Close dialog
-                  // Navigate to Delete Account Page
-                },
-                child: Text("CONFIRM", style: TextStyle(color: Colors.white)),
-              ),
-            ),
-          ],
-        );
-      },
-    );
+  /// Loads the account the user tapped, if any, from SharedPreferences.
+Future<void> _loadSelectedAccount() async {
+  final prefs = await SharedPreferences.getInstance();
+  final no  = prefs.getString('selectedAccountNumber');
+  final amt = prefs.getString('selectedAccountAmount');
+  if (no != null && no.isNotEmpty) {
+    setState(() {
+      account   = Account(accountNumber: no, amount: amt);
+      isLoading = false;
+    });
   }
 }
 
-void _showLogoutDialog(BuildContext context) {
+
+  void _showDeleteConfirmationDialog(BuildContext context) {
   showDialog(
     context: context,
-    builder: (BuildContext context) {
+    builder: (context) {
       return AlertDialog(
-        title: Text("Logout Alert"),
-        content: Text("Are you sure you want to exit the app?"),
+        title: Text("Delete Account"),
+        content: Text("Do you wish to request deletion of this account?"),
         actions: [
-          Container(
-            decoration: BoxDecoration(
-              color: Colors.grey[300], // Grey background for cancel
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: TextButton(
-              onPressed: () {
-                Navigator.pop(context); // Close dialog
-              },
-              child: Text("CANCEL", style: TextStyle(color: Colors.blue)),
-            ),
+          TextButton(
+            child: Text("CANCEL"),
+            onPressed: () => Navigator.of(context).pop(),
           ),
-          Container(
-            decoration: BoxDecoration(
-              color: Colors.orange, // Orange background for delete
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: TextButton(
-              onPressed: () {
-                Navigator.pop(context); // Close dialog
-                // Navigate to Delete Account Page
-              },
-              child: Text("EXIT", style: TextStyle(color: Colors.white)),
-            ),
+          TextButton(
+            child: Text("CONFIRM"),
+            onPressed: () async {
+              Navigator.of(context).pop(); // close dialog
+
+              // 1) Grab current account info
+              final prefs = await SharedPreferences.getInstance();
+              final acctNo = prefs.getString('selectedAccountNumber') ?? 'N/A';
+              final email  = prefs.getString('email') ?? 'N/A';
+
+              // 2) Show confirmation snackbar
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text(
+                  "Delete request sent. We'll contact you soon."
+                )),
+              );
+
+              // 3) Launch mailto: with prefilled body
+              final subject = Uri.encodeComponent("Account Deletion Request");
+              final body = Uri.encodeComponent(
+                "Hello WeFund Team,\n\n"
+                "Please delete the following account per my request:\n\n"
+                "• Account Number: $acctNo\n"
+                "• Registered Email: $email\n\n"
+                "Thank you."
+              );
+              final uri = Uri.parse("mailto:support@wefundglobalfx.com"
+                  "?subject=$subject&body=$body");
+              if (await canLaunchUrl(uri)) {
+                await launchUrl(uri);
+              }
+            },
           ),
         ],
       );
     },
   );
+}
+
+
+void _showLogoutDialog(BuildContext context) {
+  showDialog(
+    context: context,
+    builder: (context) {
+      return AlertDialog(
+        title: Text("Logout Alert"),
+        content: Text("Are you sure you want to log out?"),
+        actions: [
+          TextButton(
+            child: Text("CANCEL"),
+            onPressed: () => Navigator.of(context).pop(),
+          ),
+          TextButton(
+            child: Text("EXIT"),
+            onPressed: () async {
+              // 1) Only clear the login/session keys, leave your "rememberMe" and credentials intact
+              final prefs = await SharedPreferences.getInstance();
+
+              await prefs.remove('isLoggedIn');
+              await prefs.remove('selectedAccountNumber');
+              await prefs.remove('selectedAccountAmount');
+
+              // 2) Navigate back to the login screen (removing all other routes)
+              Navigator.of(context).pushAndRemoveUntil(
+                MaterialPageRoute(builder: (_) => LoginScreen()),
+                (route) => false,
+              );
+            },
+          ),
+        ],
+      );
+    },
+  );
+}
+
 }
 
 // class MAMPage extends StatelessWidget {
@@ -498,87 +671,86 @@ void _showLogoutDialog(BuildContext context) {
 //   }
 // }
 
-class ClientPortalPage extends StatelessWidget {
-  const ClientPortalPage({super.key});
+// class ClientPortalPage extends StatelessWidget {
+//   const ClientPortalPage({super.key});
 
-  Future<void> _launchURL() async {
-    final Uri uri = Uri.parse('https://www.wefundglobalfx.com/copy-traders');
+//   Future<void> _launchURL() async {
+//     final Uri uri = Uri.parse('https://www.wefundglobalfx.com/copy-traders');
 
-    if (await canLaunchUrl(uri)) {
-      await launchUrl(
-        uri,
-        mode: LaunchMode.externalApplication, // Open in browser
-      );
-    } else {
-      debugPrint("Could not open the link: $uri");
-    }
-  }
+//     if (await canLaunchUrl(uri)) {
+//       await launchUrl(
+//         uri,
+//         mode: LaunchMode.externalApplication, // Open in browser
+//       );
+//     } else {
+//       debugPrint("Could not open the link: $uri");
+//     }
+//   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text(
-          "Client Portal",
-          style: TextStyle(fontSize: 22, fontWeight: FontWeight.w700),
-          textAlign: TextAlign.center,
-        ),
-        centerTitle: true,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios), // iOS-style back arrow
-          onPressed: () {
-            Navigator.pop(context);
-          },
-        ),
-        backgroundColor: Colors.white,
-      ),
-      body: SafeArea(
-        child: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              // Profile Image
-              Container(
-                height: 20.h,
-                width: 40.w,
-                decoration: const BoxDecoration(
-                  shape: BoxShape.circle,
-                  image: DecorationImage(
-                    image: AssetImage("assets/1.png"), // Ensure image exists
-                    fit: BoxFit.cover,
-                  ),
-                ),
-              ),
-              SizedBox(height: 3.h), // Space between image and button
+//   @override
+//   Widget build(BuildContext context) {
+//     return Scaffold(
+//       appBar: AppBar(
+//         title: const Text(
+//           "Client Portal",
+//           style: TextStyle(fontSize: 22, fontWeight: FontWeight.w700),
+//           textAlign: TextAlign.center,
+//         ),
+//         centerTitle: true,
+//         leading: IconButton(
+//           icon: const Icon(Icons.arrow_back_ios), // iOS-style back arrow
+//           onPressed: () {
+//             Navigator.pop(context);
+//           },
+//         ),
+//         backgroundColor: Colors.white,
+//       ),
+//       body: SafeArea(
+//         child: Center(
+//           child: Column(
+//             mainAxisAlignment: MainAxisAlignment.center,
+//             children: [
+//               // Profile Image
+//               Container(
+//                 height: 20.h,
+//                 width: 40.w,
+//                 decoration: const BoxDecoration(
+//                   shape: BoxShape.circle,
+//                   image: DecorationImage(
+//                     image: AssetImage("assets/1.png"), // Ensure image exists
+//                     fit: BoxFit.cover,
+//                   ),
+//                 ),
+//               ),
+//               SizedBox(height: 3.h), // Space between image and button
 
-              // Create Account Button
-              ElevatedButton(
-                onPressed: _launchURL,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.blue,
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 30, vertical: 12),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                ),
-                child: const Text(
-                  "Create Account",
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.white,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
+//               // Create Account Button
+//               ElevatedButton(
+//                 onPressed: _launchURL,
+//                 style: ElevatedButton.styleFrom(
+//                   backgroundColor: Colors.blue,
+//                   padding:
+//                       const EdgeInsets.symmetric(horizontal: 30, vertical: 12),
+//                   shape: RoundedRectangleBorder(
+//                     borderRadius: BorderRadius.circular(10),
+//                   ),
+//                 ),
+//                 child: const Text(
+//                   "Create Account",
+//                   style: TextStyle(
+//                     fontSize: 16,
+//                     fontWeight: FontWeight.bold,
+//                     color: Colors.white,
+//                   ),
+//                 ),
+//               ),
+//             ],
+//           ),
+//         ),
+//       ),
+//     );
+//   }
+// }
 
 // Dummy Next Page
 class NextPage extends StatefulWidget {
@@ -601,9 +773,20 @@ class _NextPageState extends State<NextPage> {
       FocusScope.of(context).unfocus(); // Hide keyboard
 
       // Navigate to the next screen after 1 second
+onPressed: () async {
+      final prefs = await SharedPreferences.getInstance();
+  final jwt   = prefs.getString('jwt') ?? '';
 
-      Navigator.push(context,
-          MaterialPageRoute(builder: (context) => BottomNavigationBarWidget()));
+  Navigator.of(context).pushAndRemoveUntil(
+    MaterialPageRoute(
+      builder: (_) => BottomNavigationBarWidget(
+        jwt: jwt,
+        initialIndex: 4,
+      ),
+    ),
+    (route) => false,
+  );
+};
     }
   }
 
@@ -633,7 +816,7 @@ class _NextPageState extends State<NextPage> {
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Image.asset('assets/1.png', height: 80),
+                  Image.asset('assets/logo.png', height: 80),
                   SizedBox(height: 20),
                   Text("Login to WEFUND",
                       style:
@@ -754,8 +937,20 @@ class _SignupScreenState extends State<SignupScreen> {
   void _signup() {
     if (_formKey.currentState!.validate()) {
       FocusScope.of(context).unfocus();
-      Navigator.push(context,
-          MaterialPageRoute(builder: (context) => BottomNavigationBarWidget()));
+      onPressed: () async {
+      final prefs = await SharedPreferences.getInstance();
+  final jwt   = prefs.getString('jwt') ?? '';
+
+  Navigator.of(context).pushAndRemoveUntil(
+    MaterialPageRoute(
+      builder: (_) => BottomNavigationBarWidget(
+        jwt: jwt,
+        initialIndex: 4,
+      ),
+    ),
+    (route) => false,
+  );
+      };
     }
   }
 
@@ -780,7 +975,7 @@ class _SignupScreenState extends State<SignupScreen> {
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Image.asset('assets/1.png', height: 80),
+                  Image.asset('assets/logo.png', height: 80),
                   SizedBox(height: 20),
                   Text("Sign Up to WEFUND",
                       style:
@@ -868,66 +1063,187 @@ class _SignupScreenState extends State<SignupScreen> {
   }
 }
 
-class SupportPage extends StatelessWidget {
-  final String whatsappNumber =
-      "+911234567890"; // Replace with actual WhatsApp number
+/// Replace your old SupportPage with this:
 
-  void openWhatsApp() async {
-    String url = "https://wa.me/$whatsappNumber";
-    if (await canLaunch(url)) {
-      await launch(url);
-    } else {
-      print("Could not launch $url");
+// lib/SettingsPage.dart (or wherever your SupportPage lives)
+
+
+class SupportPage extends StatelessWidget {
+  static const _telegramUsername = 'wefundsupport';
+  static const _supportEmail = 'support@wefundedfx.com';
+
+  Future<void> _openTelegram(BuildContext context) async {
+    final telegramUri = Uri.parse('tg://resolve?domain=$_telegramUsername');
+    final webUri = Uri.parse('https://t.me/$_telegramUsername');
+
+    // Try opening in Telegram app
+    try {
+      await launchUrl(telegramUri, mode: LaunchMode.externalApplication);
+      return;
+    } catch (_) {
+      // Native Telegram failed, fall through to web
+    }
+
+    // Fallback: open in browser
+    try {
+      await launchUrl(webUri, mode: LaunchMode.externalApplication);
+      return;
+    } catch (_) {
+      // both failed
+    }
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Could not open Telegram.')),
+    );
+  }
+
+  Future<void> _sendEmail(BuildContext context) async {
+    final emailUri = Uri(
+      scheme: 'mailto',
+      path: _supportEmail,
+      // you can add default subject/body here:
+      // query: 'subject=Support Request&body=Hello, ...'
+    );
+
+    try {
+      await launchUrl(emailUri, mode: LaunchMode.externalApplication);
+    } catch (_) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not open email client.')),
+      );
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final themeProvider = Provider.of<ThemeProvider>(context);
+    final theme = Provider.of<ThemeProvider>(context);
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(
-          "Support",
-          style: TextStyle(fontSize: 22, fontWeight: FontWeight.w700),
-        ),
+        title: const Text('Support'),
         centerTitle: true,
-        backgroundColor: themeProvider.isDarkMode ? Colors.black : Colors.white,
-        leading: IconButton(
-          icon: Icon(Icons.arrow_back_ios), // iOS-style back arrow
-          onPressed: () {
-            Navigator.pop(context);
-          },
+        backgroundColor: theme.isDarkMode ? Colors.black : Colors.white,
+        iconTheme: IconThemeData(
+          color: theme.isDarkMode ? Colors.white : Colors.black,
         ),
       ),
-      body: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Image.asset('assets/WhatsApp.svg.png',
-              height: 80), // Replace with correct image path
-          SizedBox(height: 20),
-          Text(
-            "Getting in touch with our customer support team on WhatsApp",
-            textAlign: TextAlign.center,
-            style: TextStyle(fontSize: 16),
+      body: Center(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Telegram Support Card
+              Card(
+                elevation: 4,
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12)),
+                child: Padding(
+                  padding:
+                      const EdgeInsets.symmetric(vertical: 32, horizontal: 16),
+                  child: Column(
+                    children: [
+                      Icon(
+                        Icons.telegram,
+                        size: 72,
+                        color: Colors.blueAccent,
+                      ),
+                      const SizedBox(height: 16),
+                      const Text(
+                        "Need help? Chat with us on Telegram",
+                        textAlign: TextAlign.center,
+                        style:
+                            TextStyle(fontSize: 18, fontWeight: FontWeight.w500),
+                      ),
+                      const SizedBox(height: 24),
+                      ElevatedButton.icon(
+                        onPressed: () => _openTelegram(context),
+                        icon: const Icon(Icons.send, color: Colors.white),
+                        label: Text(
+                          "@$_telegramUsername",
+                          style: const TextStyle(
+                              color: Colors.white, fontSize: 16),
+                        ),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.blueAccent,
+                          padding: const EdgeInsets.symmetric(
+                              vertical: 12, horizontal: 24),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+
+              const SizedBox(height: 24),
+
+              // Email Support Card
+              SizedBox(
+  width: double.infinity,                   // ← forces full width
+  child: Card(
+    elevation: 4,
+    shape: RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(12),
+    ),
+                child: Padding(
+                  padding:
+                      const EdgeInsets.symmetric(vertical: 32, horizontal: 16),
+                  child: Column(
+                    children: [
+                      Icon(
+                        Icons.email,
+                        size: 72,
+                        color: theme.isDarkMode
+                            ? Colors.orangeAccent
+                            : Colors.deepOrange,
+                      ),
+                      const SizedBox(height: 16),
+                      const Text(
+                        "Prefer email? Reach us at",
+                        textAlign: TextAlign.center,
+                        style:
+                            TextStyle(fontSize: 18, fontWeight: FontWeight.w500),
+                      ),
+                      const SizedBox(height: 8),
+                      SelectableText(
+                        _supportEmail,
+                        style: const TextStyle(
+                            fontSize: 16, fontWeight: FontWeight.bold),
+                      ),
+                      const SizedBox(height: 24),
+                      ElevatedButton.icon(
+                        onPressed: () => _sendEmail(context),
+                        icon: const Icon(Icons.mail_outline, color: Colors.white),
+                        label: const Text(
+                          "Email Support",
+                          style:
+                              TextStyle(color: Colors.white, fontSize: 16),
+                        ),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.deepOrange,
+                          padding: const EdgeInsets.symmetric(
+                              vertical: 12, horizontal: 24),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              ),
+            ],
           ),
-          SizedBox(height: 20),
-          ElevatedButton(
-            onPressed: openWhatsApp,
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.green,
-              padding: EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-            ),
-            child: Text(
-              "Go to WhatsApp",
-              style: TextStyle(fontSize: 16, color: Colors.white),
-            ),
-          ),
-        ],
+        ),
       ),
     );
   }
 }
+
 
 class UpdatePage extends StatelessWidget {
   @override
@@ -962,7 +1278,7 @@ class UpdatePage extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               Image.asset(
-                "assets/1.png", // Replace with your logo path
+                "assets/logo.png", // Replace with your logo path
                 height: 100,
               ),
               SizedBox(height: 2.h),
@@ -1053,17 +1369,166 @@ class PrivacyPolicyPage extends StatelessWidget {
   }
 }
 
-class AartiCapitalDetailsPage extends StatelessWidget {
+// class AartiCapitalDetailsPage extends StatelessWidget {
+//   @override
+//   Widget build(BuildContext context) {
+//     final themeProvider = Provider.of<ThemeProvider>(context);
+
+//     // Sample data for accounts
+//     final List<Map<String, String>> accounts = [
+//       {"accountNo": "10009", "balance": "0.00"},
+//       {"accountNo": "10011", "balance": "0.00"},
+//       {"accountNo": "10010", "balance": "9999.60"},
+//     ];
+
+//     return Scaffold(
+//       appBar: AppBar(
+//         title: const Text(
+//           "Account List",
+//           style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+//         ),
+//         centerTitle: true,
+//         leading: IconButton(
+//           icon: const Icon(Icons.arrow_back_ios),
+//           onPressed: () {
+//             Navigator.pop(context);
+//           },
+//         ),
+//         backgroundColor: themeProvider.isDarkMode ? Colors.black : Colors.white,
+//         iconTheme: IconThemeData(
+//             color: themeProvider.isDarkMode ? Colors.white : Colors.black),
+//       ),
+//       body: Padding(
+//         padding: const EdgeInsets.all(16.0),
+//         child: Column(
+//           crossAxisAlignment: CrossAxisAlignment.center,
+//           children: [
+//             const Text(
+//               "Welcome WeFundedFX",
+//               style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+//               textAlign: TextAlign.center,
+//             ),
+//             const SizedBox(height: 20),
+//             Expanded(
+//               child: ListView.builder(
+//                 itemCount: accounts.length,
+//                 itemBuilder: (context, index) {
+//                   final account = accounts[index];
+//                   return Card(
+//                     elevation: 2,
+//                     margin: const EdgeInsets.symmetric(vertical: 8),
+//                     child: ListTile(
+//                       leading: CircleAvatar(
+//                         backgroundColor: Colors.green,
+//                         child: Icon(Icons.person, color: Colors.white),
+//                       ),
+//                       title: Text(
+//                         "Account No : ${account['accountNo']}",
+//                         style: const TextStyle(fontWeight: FontWeight.bold),
+//                       ),
+//                       subtitle: Text("Balance : ${account['balance']}"),
+//                       trailing: const Icon(Icons.arrow_forward_ios),
+//                       onTap: () {
+//                         // Handle on tap
+//                       },
+//                     ),
+//                   );
+//                 },
+//               ),
+//             ),
+//           ],
+//         ),
+//       ),
+//     );
+//   }
+// }
+
+class AartiCapitalDetailsPage extends StatefulWidget {
+  const AartiCapitalDetailsPage({Key? key}) : super(key: key);
+
+  @override
+  _AartiCapitalDetailsPageState createState() => _AartiCapitalDetailsPageState();
+}
+
+class _AartiCapitalDetailsPageState extends State<AartiCapitalDetailsPage> {
+  List<Account> accounts = [];
+  bool isLoading = true;
+  String? errorMessage;
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchAccounts();
+  }
+
+  Future<void> _fetchAccounts() async {
+  setState(() {
+    isLoading = true;
+    errorMessage = null;
+  });
+
+  try {
+    // 1) get saved email
+    final prefs = await SharedPreferences.getInstance();
+    final email = prefs.getString('email') ?? '';
+    if (email.isEmpty) {
+      setState(() {
+        errorMessage = "No user email found.";
+        isLoading = false;
+      });
+      return;
+    }
+
+    // 2) POST to accbal_api.php
+    final response = await http.post(
+      Uri.parse('https://wefundclient.com/Crm/Crm/accbal_api.php'),
+      headers: {'Content-Type': 'application/json'},
+      body: json.encode({'email': email}),
+    );
+
+    if (response.statusCode != 200) {
+      throw Exception('Server error: ${response.statusCode}');
+    }
+
+    final List<dynamic> raw = json.decode(response.body);
+    if (raw.isEmpty) {
+      throw Exception('No accounts returned for $email');
+    }
+
+    // 3) Map into model
+    final fetched = raw
+        .cast<Map<String, dynamic>>()
+        .map((e) => Account.fromJson(e))
+        .toList();
+
+    // 4) Auto-select the very first one if none chosen yet
+    final selectedAcct = prefs.getString('selectedAccountNumber') ?? '';
+    if (selectedAcct.isEmpty) {
+  final first = fetched.first;
+  await Provider.of<AccountProvider>(context, listen: false)
+      .select(first.accountNumber!, first.amount!);
+  await prefs.setString('selectedAccountNumber', first.accountNumber!);
+  await prefs.setString('selectedAccountAmount', first.amount!);
+  await prefs.setInt('selectedUserId', first.userId!);
+    }
+
+    // 5) Update local state
+    setState(() {
+      accounts = fetched;
+      isLoading = false;
+    });
+  } catch (e) {
+    setState(() {
+      errorMessage = "Error fetching accounts: $e";
+      isLoading = false;
+    });
+  }
+}
+
+
   @override
   Widget build(BuildContext context) {
     final themeProvider = Provider.of<ThemeProvider>(context);
-
-    // Sample data for accounts
-    final List<Map<String, String>> accounts = [
-      {"accountNo": "10009", "balance": "0.00"},
-      {"accountNo": "10011", "balance": "0.00"},
-      {"accountNo": "10010", "balance": "9999.60"},
-    ];
 
     return Scaffold(
       appBar: AppBar(
@@ -1074,54 +1539,88 @@ class AartiCapitalDetailsPage extends StatelessWidget {
         centerTitle: true,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_ios),
-          onPressed: () {
-            Navigator.pop(context);
-          },
+          onPressed: () => Navigator.pop(context),
         ),
-        backgroundColor: themeProvider.isDarkMode ? Colors.black : Colors.white,
+        backgroundColor:
+            themeProvider.isDarkMode ? Colors.black : Colors.white,
         iconTheme: IconThemeData(
             color: themeProvider.isDarkMode ? Colors.white : Colors.black),
       ),
       body: Padding(
         padding: const EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            const Text(
-              "Welcome WeFundedFX",
-              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 20),
-            Expanded(
-              child: ListView.builder(
-                itemCount: accounts.length,
-                itemBuilder: (context, index) {
-                  final account = accounts[index];
-                  return Card(
-                    elevation: 2,
-                    margin: const EdgeInsets.symmetric(vertical: 8),
-                    child: ListTile(
-                      leading: CircleAvatar(
-                        backgroundColor: Colors.green,
-                        child: Icon(Icons.person, color: Colors.white),
+        child: isLoading
+            ? Center(child: CircularProgressIndicator())
+            : (errorMessage != null
+                ? Center(child: Text(errorMessage!))
+                : Column(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      const Text(
+                        "Welcome WeFundedFX",
+                        style: TextStyle(
+                            fontSize: 20, fontWeight: FontWeight.bold),
+                        textAlign: TextAlign.center,
                       ),
-                      title: Text(
-                        "Account No : ${account['accountNo']}",
-                        style: const TextStyle(fontWeight: FontWeight.bold),
+                      const SizedBox(height: 20),
+                      Expanded(
+                        child: ListView.builder(
+                          itemCount: accounts.length,
+                          itemBuilder: (context, index) {
+                            final acc = accounts[index];
+                            return Card(
+                              elevation: 2,
+                              margin:
+                                  const EdgeInsets.symmetric(vertical: 8),
+                              child: ListTile(
+                                leading: CircleAvatar(
+                                  backgroundColor: Colors.green,
+                                  child: Icon(Icons.person,
+                                      color: Colors.white),
+                                ),
+                                title: Text(
+                                  "Account No : ${acc.accountNumber}",
+                                  style: const TextStyle(
+                                      fontWeight: FontWeight.bold),
+                                ),
+                                subtitle:
+                                    Text("Balance : \$${acc.amount}"),
+                                trailing: const Icon(
+                                    Icons.arrow_forward_ios),
+                                onTap: () async {
+  // 1) update your AccountProvider
+  Provider.of<AccountProvider>(context, listen: false)
+      .select(acc.accountNumber!, acc.amount!);
+
+  // 2) save the user_id and account_number into prefs
+  final prefs = await SharedPreferences.getInstance();
+  await prefs.setString('selectedAccountNumber', acc.accountNumber!);
+  await prefs.setString('selectedAccountAmount', acc.amount!);
+  if (acc.userId != null) {
+    await prefs.setInt('selectedUserId', acc.userId!);
+  }
+
+  // 3) navigate to the SettingsPage, replacing this page
+ 
+  final jwt   = prefs.getString('jwt') ?? '';
+  Navigator.of(context).pushAndRemoveUntil(
+    MaterialPageRoute(
+      builder: (_) => BottomNavigationBarWidget(
+        jwt: jwt,
+        initialIndex: 4,  // the index of your Settings tab
+      ),
+    ),
+    (route) => false,
+  );
+},
+
+
+                              ),
+                            );
+                          },
+                        ),
                       ),
-                      subtitle: Text("Balance : ${account['balance']}"),
-                      trailing: const Icon(Icons.arrow_forward_ios),
-                      onTap: () {
-                        // Handle on tap
-                      },
-                    ),
-                  );
-                },
-              ),
-            ),
-          ],
-        ),
+                    ],
+                  )),
       ),
     );
   }

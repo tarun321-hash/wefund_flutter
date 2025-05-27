@@ -1,10 +1,13 @@
 import 'dart:convert';
-
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:wefund/BottomNavigationBar.dart';
-import 'package:wefund/ForgetPasswordScreen.dart';
+import 'package:wefund/forgot_password.dart';
 import 'package:wefund/api/singup.dart';
+import 'package:wefund/Positions.dart';
+import 'package:wefund/History.dart';
+
 
 class Login {
   final bool success;
@@ -14,7 +17,7 @@ class Login {
 
   factory Login.fromJson(Map<String, dynamic> json) {
     return Login(
-      success: json['success'] ?? false,  // Change to match API response
+      success: json['success'] ?? false,
       message: json['message'] ?? 'Something went wrong',
     );
   }
@@ -22,83 +25,158 @@ class Login {
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
-
   @override
   _LoginScreenState createState() => _LoginScreenState();
 }
 
 class _LoginScreenState extends State<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
-  final TextEditingController emailController = TextEditingController();
-  final TextEditingController passwordController = TextEditingController();
-  bool _obscureText = true;
-  bool _isLoading = false;
+  late TextEditingController emailController;
+  late TextEditingController passwordController;
+  bool _obscureText  = true;
+  bool _isLoading    = false;
+  bool _rememberMe   = false;
+
+  @override
+  void initState() {
+    super.initState();
+    emailController    = TextEditingController();
+    passwordController = TextEditingController();
+    _bootstrap();       // <— load saved creds & maybe auto-navigate
+  }
+
+  /// Load "remember me" credentials and then check if
+  /// the user is already logged in (regardless of remember).
+  Future<void> _bootstrap() async {
+    final prefs = await SharedPreferences.getInstance();
+
+    // 1) Restore e-mail/password if they had asked us to "Remember Me"
+    final savedRemember = prefs.getBool('rememberMe') ?? false;
+    if (savedRemember) {
+      emailController.text    = prefs.getString('email')    ?? '';
+      passwordController.text = prefs.getString('password') ?? '';
+      _rememberMe = true;
+    }
+
+    // 2) If they ever logged in before, send them right in.
+    final already   = prefs.getBool('isLoggedIn') ?? false;
+final storedJwt = prefs.getString('jwt');  // may be null
+
+if (already && storedJwt != null) {
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(
+        builder: (_) => BottomNavigationBarWidget(
+          jwt: storedJwt,        // non‐null here
+          initialIndex: 0,
+        ),
+      ),
+    );
+  });
+}
+
+  }
+
+  @override
+  void dispose() {
+    emailController.dispose();
+    passwordController.dispose();
+    super.dispose();
+  }
 
   Future<void> login() async {
     if (!_formKey.currentState!.validate()) return;
+    FocusScope.of(context).unfocus();
+    setState(() => _isLoading = true);
 
-    FocusScope.of(context).unfocus(); // Dismiss the keyboard
-
-    setState(() {
-      _isLoading = true;
-    });
-
-    const String apiUrl = "https://wefundclient.com/Crm/Crm/login_api.php";
+    const loginUrl = "https://wefundclient.com/Crm/Crm/login_api.php";
+    const balUrl   = "https://wefundclient.com/Crm/Crm/accbal_api.php";
 
     try {
-      final response = await http.post(
-        Uri.parse(apiUrl),
+      // 1) Perform login
+      final loginResp = await http.post(
+        Uri.parse(loginUrl),
         headers: {
-          "Content-Type": "application/x-www-form-urlencoded",
+          "Content-Type": "application/json",
           "Accept": "application/json",
         },
-        body: {
-          "email": emailController.text.trim(),
-          "app_password": passwordController.text.trim(),
-        },
+        body: jsonEncode({
+          'email': emailController.text.trim(),
+          'app_password': passwordController.text.trim(),
+        }),
       );
 
-      if (response.statusCode == 200) {
-        final Map<String, dynamic> data = jsonDecode(response.body);
+      final loginData = jsonDecode(loginResp.body) as Map<String, dynamic>;
+      
+      final success   = loginData['success'] == true;
+      final message   = loginData['message'] ?? 'Unknown error';
 
-        if (data.containsKey('success')) {  // Ensure API format
-          Login loginResponse = Login.fromJson(data);
-
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(loginResponse.message),
-              backgroundColor: loginResponse.success ? Colors.green : Colors.red,
-            ),
-          );
-
-          if (loginResponse.success) {
-            Navigator.pushReplacement(
-              context,
-              MaterialPageRoute(builder: (context) => BottomNavigationBarWidget()),
-            );
-          }
-        } else {
-          throw Exception("Unexpected API response format");
-        }
-      } else {
-        throw Exception("Server error. Please try again later.");
-      }
-    } catch (error) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Network error: $error"), backgroundColor: Colors.red),
+        SnackBar(
+          content: Text(message),
+          backgroundColor: success ? Colors.green : Colors.red,
+        ),
+      );
+      if (!success) {
+        setState(() => _isLoading = false);
+        return;
+      }
+
+      // 2) Persist login + “remember me”
+      final jwt   = loginData['jwt'] as String;
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('jwt', jwt);
+      await prefs.setBool('isLoggedIn', true);
+      await prefs.setString('email',    emailController.text.trim());
+      await prefs.setString('password', passwordController.text.trim());
+      await prefs.setBool('rememberMe', _rememberMe);
+
+      // 3) Fetch that user’s accounts
+      final balResp = await http.post(
+        Uri.parse(balUrl),
+        headers: { "Content-Type": "application/json" },
+        body: jsonEncode({ "email": emailController.text.trim() }),
+      );
+      if (balResp.statusCode == 200) {
+        final List<dynamic> accounts = jsonDecode(balResp.body);
+        if (accounts.isNotEmpty) {
+          final acct = accounts.first as Map<String, dynamic>;
+          await prefs.setString('selectedAccountNumber',
+              acct['account_number'].toString());
+          await prefs.setString('selectedAccountAmount',
+              acct['amount'].toString());
+        }
+      }
+
+      // 4) Navigate into your main app
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (_) => BottomNavigationBarWidget(
+            jwt: jwt,
+            initialIndex: 4, // 0 = Trade tab (PositionsPage)
+          ),
+        ),
+      );
+    } catch (err) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text("Network error: $err"),
+          backgroundColor: Colors.red,
+        ),
       );
     } finally {
-      setState(() {
-        _isLoading = false;
-      });
+      setState(() => _isLoading = false);
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: Colors.white,
       body: GestureDetector(
-        onTap: () => FocusScope.of(context).unfocus(), // Dismiss keyboard on tap
+        onTap: () => FocusScope.of(context).unfocus(),
         child: Padding(
           padding: const EdgeInsets.all(16.0),
           child: Center(
@@ -106,13 +184,14 @@ class _LoginScreenState extends State<LoginScreen> {
               child: Form(
                 key: _formKey,
                 child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Image.asset('assets/1.png', height: 80),
+                    Image.asset('assets/logo.png', height: 80),
                     const SizedBox(height: 20),
-                    const Text("Login to WEFUND",
-                        style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-
+                    const Text(
+                      "Login to WEFUND",
+                      style:
+                          TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                    ),
                     const SizedBox(height: 20),
                     TextFormField(
                       controller: emailController,
@@ -121,15 +200,9 @@ class _LoginScreenState extends State<LoginScreen> {
                         labelText: "Email",
                         border: OutlineInputBorder(),
                       ),
-                      validator: (value) {
-                        if (value!.isEmpty) return "Enter your email";
-                        if (!RegExp(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$").hasMatch(value)) {
-                          return "Enter a valid email address";
-                        }
-                        return null;
-                      },
+                      validator: (v) =>
+                          (v == null || v.isEmpty) ? "Enter your email" : null,
                     ),
-
                     const SizedBox(height: 15),
                     TextFormField(
                       controller: passwordController,
@@ -139,64 +212,74 @@ class _LoginScreenState extends State<LoginScreen> {
                         labelText: "Password",
                         border: const OutlineInputBorder(),
                         suffixIcon: IconButton(
-                          icon: Icon(
-                            _obscureText ? Icons.visibility_off : Icons.visibility,
-                            color: Colors.blue,
-                          ),
-                          onPressed: () {
-                            setState(() {
-                              _obscureText = !_obscureText;
-                            });
-                          },
+                          icon: Icon(_obscureText
+                              ? Icons.visibility_off
+                              : Icons.visibility),
+                          onPressed: () =>
+                              setState(() => _obscureText = !_obscureText),
                         ),
                       ),
-                      validator: (value) {
-                        if (value!.isEmpty) return "Enter your password";
-                        if (value.length < 6) return "Password must be at least 6 characters";
+                      validator: (v) {
+                        if (v == null || v.isEmpty) {
+                          return "Enter your password";
+                        }
+                        if (v.length < 6) {
+                          return "Password must be ≥ 6 chars";
+                        }
                         return null;
                       },
                     ),
-
                     const SizedBox(height: 10),
                     Align(
                       alignment: Alignment.centerRight,
                       child: TextButton(
-                        onPressed: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(builder: (context) => ForgetPasswordScreen()),
-                          );
-                        },
-                        child: const Text("Forgot Password?", style: TextStyle(color: Colors.blue)),
+                        onPressed: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                              builder: (_) => ForgotPasswordFlowScreen()),
+                        ),
+                        child: const Text("Forgot Password?",
+                            style: TextStyle(color: Colors.blue)),
                       ),
                     ),
-
+                    CheckboxListTile(
+                      value: _rememberMe,
+                      onChanged: (v) => setState(() => _rememberMe = v ?? false),
+                      title: const Text("Remember Me"),
+                      controlAffinity: ListTileControlAffinity.leading,
+                      contentPadding: EdgeInsets.zero,
+                    ),
                     const SizedBox(height: 15),
                     _isLoading
                         ? const CircularProgressIndicator()
                         : ElevatedButton(
+                            onPressed: login,
                             style: ElevatedButton.styleFrom(
                               backgroundColor: Colors.blue,
-                              padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 100),
+                              padding: const EdgeInsets.symmetric(
+                                  vertical: 14, horizontal: 100),
                             ),
-                            onPressed: login,
-                            child: const Text("Log In", style: TextStyle(fontSize: 18, color: Colors.white)),
+                            child: const Text("Log In",
+                                style: TextStyle(
+                                    fontSize: 18, color: Colors.white)),
                           ),
-
                     const SizedBox(height: 10),
                     TextButton(
-                      onPressed: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(builder: (context) => SignupScreen()),
-                        );
-                      },
+                      onPressed: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                            builder: (_) => SignupScreen()),
+                      ),
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: const [
-                          Text("Not Registered yet?", style: TextStyle(fontSize: 16, color: Colors.grey)),
+                          Text("Not Registered yet?",
+                              style:
+                                  TextStyle(fontSize: 16, color: Colors.grey)),
                           SizedBox(width: 5),
-                          Text("Sign up", style: TextStyle(fontSize: 18, color: Colors.blue)),
+                          Text("Sign up",
+                              style:
+                                  TextStyle(fontSize: 18, color: Colors.blue)),
                         ],
                       ),
                     ),
