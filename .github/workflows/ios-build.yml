@@ -27,12 +27,3 @@ jobs:
       - name: Build for Simulator
         run: flutter build ios --simulator
 
-      - name: Build unsigned IPA
-        run: flutter build ipa --export-method ad-hoc --no-codesign
-
-      - name: Upload unsigned IPA
-        uses: actions/upload-artifact@v2
-        with:
-         name: ios-unsigned-ipa
-         path: build/ios/ipa/*.ipa
-
